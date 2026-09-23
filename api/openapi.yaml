@@ -1,0 +1,97 @@
+openapi: 3.0.3
+info:
+  title: webhook-middleware
+  description: >
+    Receives every payment-gateway webhook callback, persists it, publishes
+    it to Kafka for downstream services, and exposes a dashboard API to
+    track every inbound event.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8090
+paths:
+  /webhooks/{source}:
+    post:
+      summary: Ingest a payment gateway callback
+      description: >
+        Called by the payment gateway itself (e.g. midtrans, xendit, stripe).
+        Always returns 200 once the event is durably persisted, regardless
+        of whether the Kafka publish succeeded (publish failures are
+        recorded and retried in the background).
+      parameters:
+        - name: source
+          in: path
+          required: true
+          schema: { type: string }
+          example: midtrans
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Event received and persisted.
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        "200": { description: OK }
+  /dashboard/webhooks:
+    get:
+      summary: List received webhook events
+      parameters:
+        - { name: source, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, published, failed] } }
+        - { name: event_type, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: Free-text search across source/event_type/endpoint }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        "200": { description: Paginated list of webhook events }
+  /dashboard/webhooks/{id}:
+    get:
+      summary: Get full detail of one webhook event (headers, raw body, kafka outcome)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Webhook event detail }
+        "404": { description: Not found }
+  /dashboard/webhooks/sources:
+    get:
+      summary: Distinct payment gateway sources seen, with counts
+      responses:
+        "200": { description: List of sources }
+  /dashboard/webhooks/stats:
+    get:
+      summary: Aggregate stats (by source, by status, by day) for dashboard charts
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        "200": { description: Aggregate statistics }
+  /dashboard/webhooks/{id}/replay:
+    post:
+      summary: Re-publish a stored event's original body to Kafka again
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Replayed }
+        "404": { description: Not found }
+  /dashboard/webhooks/retry-failed:
+    post:
+      summary: Bulk retry every event currently in "failed" publish status
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+      responses:
+        "200": { description: Retry summary }
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+security:
+  - ApiKeyAuth: []

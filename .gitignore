@@ -1,0 +1,5 @@
+.env
+bin/
+*.log
+.idea/
+.vscode/

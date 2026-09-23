@@ -1,0 +1,46 @@
+version: "3.8"
+
+# Assumes Postgres and Kafka are already running elsewhere (an existing
+# server/cluster) -- this compose file only builds/runs the app + frontend.
+# Point the vars below (via a root-level .env, which Compose auto-loads)
+# at those existing services. If they run on the Docker host itself, use
+# host.docker.internal instead of localhost so the container can reach them.
+
+services:
+  webhook-middleware:
+    build:
+      context: .
+      dockerfile: deployments/Dockerfile
+    environment:
+      HTTP_PORT: "${HTTP_PORT:-8090}"
+      DB_HOST: ${DB_HOST}
+      DB_PORT: "${DB_PORT:-5432}"
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: ${DB_NAME}
+      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      KAFKA_COMMON_TOPIC: ${KAFKA_COMMON_TOPIC:-webhook_gateway_events}
+      KAFKA_TOPIC_PREFIX: ${KAFKA_TOPIC_PREFIX:-webhook_gateway}
+      DASHBOARD_API_KEY: ${DASHBOARD_API_KEY:-}
+    ports:
+      - "${HTTP_PORT:-8090}:8090"
+    networks:
+      - default
+      - stack_stack
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: "http://localhost:8090"
+    depends_on:
+      - webhook-middleware
+    ports:
+      - "3010:3000"
+
+networks:
+  default:
+  stack_stack:
+    external: true
