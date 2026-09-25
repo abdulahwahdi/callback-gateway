@@ -3,6 +3,9 @@ import type {
   RetryFailedResult,
   SourceCount,
   Stats,
+  TopicRoute,
+  TopicRouteInput,
+  TopicRoutePatch,
   WebhookListFilter,
   WebhookLog,
 } from "@/lib/types";
@@ -42,6 +45,7 @@ async function request<T>(
     headers.set("Content-Type", "application/json");
   }
   if (cfg.apiKey) headers.set("X-API-Key", cfg.apiKey);
+  if (cfg.token) headers.set("Authorization", `Bearer ${cfg.token}`);
 
   let res: Response;
   try {
@@ -62,6 +66,11 @@ async function request<T>(
     // non-JSON body, fall through to status-based error below
   }
 
+  if (res.status === 401 && path !== "/auth/login" && typeof window !== "undefined") {
+    // Missing, expired or revoked session: let the AuthGate send the user back to /login.
+    window.dispatchEvent(new Event("auth:unauthorized"));
+  }
+
   if (!res.ok || (json && json.success === false)) {
     throw new ApiError(
       json?.message || `Request failed with status ${res.status}`,
@@ -77,6 +86,15 @@ async function request<T>(
 }
 
 export const api = {
+  authStatus: (cfg: DashboardSettings) =>
+    request<{ login_enabled: boolean; auth_required: boolean }>(cfg, "/auth/status"),
+
+  login: (cfg: DashboardSettings, username: string, password: string) =>
+    request<{ token: string; expires_at: string; username: string }>(cfg, "/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+
   health: (cfg: DashboardSettings) =>
     request<unknown>(cfg, "/healthz"),
 
@@ -114,4 +132,22 @@ export const api = {
       method: "POST",
       params: { limit },
     }),
+
+  listTopicRoutes: (cfg: DashboardSettings) =>
+    request<TopicRoute[]>(cfg, "/dashboard/topic-routes"),
+
+  createTopicRoute: (cfg: DashboardSettings, input: TopicRouteInput) =>
+    request<TopicRoute>(cfg, "/dashboard/topic-routes", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  updateTopicRoute: (cfg: DashboardSettings, id: string, patch: TopicRoutePatch) =>
+    request<TopicRoute>(cfg, `/dashboard/topic-routes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteTopicRoute: (cfg: DashboardSettings, id: string) =>
+    request<unknown>(cfg, `/dashboard/topic-routes/${id}`, { method: "DELETE" }),
 };

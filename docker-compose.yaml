@@ -13,16 +13,19 @@ services:
       dockerfile: deployments/Dockerfile
     environment:
       HTTP_PORT: "${HTTP_PORT:-8090}"
-      DB_HOST: ${DB_HOST}
-      DB_PORT: "${DB_PORT:-5432}"
-      DB_USER: ${DB_USER}
-      DB_PASS: ${DB_PASS}
-      DB_NAME: ${DB_NAME}
-      DB_SSLMODE: ${DB_SSLMODE:-disable}
+      USE_REST: "true"
+      USE_CRON_SCHEDULER: "true"
+      OTEL_TRACING_HOST: "${OTEL_TRACING_HOST:-jaeger:4317}"
+      SQL_DB_READ_DSN: "${SQL_DB_READ_DSN:-postgres://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}?sslmode=${DB_SSLMODE:-disable}&TimeZone=Asia/Jakarta}"
+      SQL_DB_WRITE_DSN: "${SQL_DB_WRITE_DSN:-postgres://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT:-5432}/${DB_NAME}?sslmode=${DB_SSLMODE:-disable}&TimeZone=Asia/Jakarta}"
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       KAFKA_COMMON_TOPIC: ${KAFKA_COMMON_TOPIC:-webhook_gateway_events}
       KAFKA_TOPIC_PREFIX: ${KAFKA_TOPIC_PREFIX:-webhook_gateway}
       DASHBOARD_API_KEY: ${DASHBOARD_API_KEY:-}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      DASHBOARD_AUTH_SECRET: ${DASHBOARD_AUTH_SECRET:-}
+      DASHBOARD_SESSION_TTL: ${DASHBOARD_SESSION_TTL:-24h}
     ports:
       - "${HTTP_PORT:-8090}:8090"
     networks:

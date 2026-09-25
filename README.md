@@ -4,8 +4,8 @@
 
 **One endpoint for every payment gateway's webhook. Persist first, publish to Kafka, never lose a callback.**
 
-[![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)](go.mod)
-[![Echo](https://img.shields.io/badge/framework-echo-3D8DFF)](https://echo.labstack.com/)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](go.mod)
+[![candi](https://img.shields.io/badge/framework-candi-3D8DFF)](https://github.com/golangid/candi)
 [![Kafka](https://img.shields.io/badge/broker-Kafka-231F20?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
 [![PostgreSQL](https://img.shields.io/badge/storage-PostgreSQL-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
@@ -42,21 +42,19 @@ Built as a clean-architecture module, following the same convention used by
 and mounted by `cmd/.../main.go`.
 
 ```
-cmd/webhook-middleware/main.go     entrypoint, wiring, graceful shutdown
-internal/config/                   env config, DB connection, auth middleware
-internal/pkg/
-  broker/                          Kafka publisher abstraction
-  verifier/                        optional per-source signature/token verification
-  response/                        standard JSON envelope
-  logger/                          structured logging
+main.go                            entrypoint (candi app runner, graceful shutdown)
+configs/                           candi dependency wiring (SQL, Kafka broker, validator) + app factory
+internal/service.go                candi service: modules + REST/cron applications
 internal/modules/webhook/
-  domain/                          WebhookLog entity + jsonb column types
-  repository/                      storage interface + Postgres/GORM impl
-  usecase/                         ingest / list / detail / replay / retry logic
+  domain/                          filters, requests, responses, errors
+  repository/                      storage interfaces + Postgres/GORM impl
+  usecase/                         ingest / list / detail / replay / retry / topic routing logic
   delivery/resthandler/            HTTP handlers (ingestion + dashboard)
-  worker/                          background retry-failed-publishes worker
+  delivery/workerhandler/          cron jobs: retry failed publishes, refresh topic routes
   module.go                        assembles the module
-migrations/                        raw SQL matching the GORM-managed schema
+pkg/shared/                        env, shared DB models (domain/), shared repository + usecase registries
+pkg/verifier/                      optional per-source signature/token verification
+cmd/migration/                     goose SQL migrations (`make migration`)
 deployments/Dockerfile
 docker-compose.yaml                app + frontend (points at your existing Postgres/Kafka)
 api/openapi.yaml                   API spec for the dashboard frontend
@@ -77,19 +75,18 @@ flowchart LR
     API --> DASH[Dashboard API]
 ```
 
-> **Note on this scaffold:** this service follows candi's module conventions and layering but does **not** import
-> the `github.com/golangid/candi` runtime framework itself — it's a self-contained service using `echo`, `gorm`,
-> and `kafka-go` directly. If you want it wired onto the literal candi runtime, run `candi init` / `candi add
-> module` and transplant the `domain/repository/usecase` files in.
+> Built on the [candi](https://github.com/golangid/candi) runtime (REST server, cron workers, Kafka broker), with
+> `gorm` for Postgres. Add further modules with `candi add module`.
 
 ## 🚀 Getting started
 
 Requires an existing Postgres database and Kafka-compatible broker (this repo doesn't bundle either).
 
 ```bash
-cp .env.sample .env      # point DB_HOST/DB_*/KAFKA_BROKERS at your existing servers
+cp .env.sample .env      # point SQL_DB_*_DSN / KAFKA_BROKERS at your existing servers
+make migration           # create/upgrade tables (goose)
 go mod tidy               # fetch dependencies, generate go.sum
-go run ./cmd/webhook-middleware
+go run .
 ```
 
 Or run everything (app + frontend) via Docker — `docker-compose.yaml` reads the same `.env` at the project root:
@@ -99,7 +96,7 @@ docker compose up --build
 ```
 
 > Postgres/Kafka running on the Docker host itself rather than a remote server? Use `host.docker.internal` instead
-> of `localhost` for `DB_HOST` / `KAFKA_BROKERS` so the container can reach them.
+> of `localhost` for `SQL_DB_*_DSN` / `KAFKA_BROKERS` so the container can reach them.
 
 Health check: `GET /healthz`
 
@@ -124,16 +121,42 @@ style sampling during local development.
 | GET    | `/dashboard/webhooks/stats`          | Aggregate counts by source/status/day     |
 | POST   | `/dashboard/webhooks/:id/replay`     | Re-publish one event's stored body to Kafka |
 | POST   | `/dashboard/webhooks/retry-failed`   | Bulk retry every `failed` event           |
+| GET/POST | `/dashboard/topic-routes`          | List / create Kafka topic route overrides |
+| PUT/DELETE | `/dashboard/topic-routes/:id`    | Update / delete a topic route             |
+| POST   | `/auth/login`                        | Exchange dashboard username/password for a session token |
+| GET    | `/auth/status`                       | Whether login is enabled / session is valid |
 
 Full request/response shapes: [`api/openapi.yaml`](api/openapi.yaml).
 
 Set `DASHBOARD_API_KEY` in `.env` to require an `X-API-Key` header on all `/dashboard/*` routes (left open by
 default for local development).
 
+Alternatively set `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` to enable a login page: the frontend signs in via
+`POST /auth/login` and `/dashboard/*` then requires the issued session token. Set `DASHBOARD_AUTH_SECRET` to a long
+random string so sessions survive restarts, and `DASHBOARD_SESSION_TTL` (default `24h`) to control expiry.
+
+### 🧭 Topic routing
+
+Events go to `webhook_gateway.<source>` by default. Per-source overrides can be managed at runtime from the
+dashboard's **Topics** page (or `/dashboard/topic-routes`); a cron job refreshes the cached routes.
+
+### 📖 Interactive API docs (Swagger UI)
+
+The spec in `api/openapi.yaml` is embedded into the binary and served live:
+
+- `GET /docs` — Swagger UI, browse and try every endpoint from the browser
+- `GET /openapi.yaml` — the raw OpenAPI spec
+
+```
+http://localhost:8090/docs
+```
+
+Editing `api/openapi.yaml` and restarting the service is all it takes to update the docs — no codegen step.
+
 ### 🖥️ Dashboard frontend
 
 A ready-to-run dashboard lives in [`frontend/`](frontend/) (Next.js + shadcn/ui): analytics overview with charts,
-a filterable/paginated event table with replay & bulk-retry, a sources breakdown, and a settings page to point it
+a filterable/paginated event table with replay & bulk-retry, a sources breakdown, topic route management, a login page, and a settings page to point it
 at any backend URL/API key.
 
 ```bash
@@ -171,7 +194,7 @@ Subscribe to `webhook_gateway_events` for everything, or `webhook_gateway.<sourc
 ## 🛠️ Makefile shortcuts
 
 ```bash
-make run          # go run ./cmd/webhook-middleware
+make run          # go run .
 make build        # build to ./bin/webhook-middleware
 make tidy         # go mod tidy
 make fmt          # gofmt -w .

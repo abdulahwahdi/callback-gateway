@@ -2,41 +2,45 @@ package resthandler
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
+	"webhook-middleware/internal/modules/webhook/domain"
 
-	"webhook-middleware/internal/modules/webhook/repository"
-	"webhook-middleware/internal/pkg/response"
+	restserver "github.com/golangid/candi/codebase/app/rest_server"
+	"github.com/golangid/candi/tracer"
+	"github.com/golangid/candi/wrapper"
+	"github.com/google/uuid"
 )
 
-// List handles GET /dashboard/webhooks -- every incoming webhook, filterable
-// by source, publish_status, event_type, free-text search, and a
+// listWebhook handles GET /dashboard/webhooks -- every incoming webhook,
+// filterable by source, publish_status, event_type, free-text search, and a
 // created_at date range, paginated.
 //
-// Query params: source, status, event_type, q, from, to, page, limit, sort, order(asc|desc)
-func (h *RestHandler) List(c echo.Context) error {
-	filter := repository.Filter{
-		Source:        c.QueryParam("source"),
-		PublishStatus: c.QueryParam("status"),
-		EventType:     c.QueryParam("event_type"),
-		Search:        c.QueryParam("q"),
-		Page:          atoiDefault(c.QueryParam("page"), 1),
-		Limit:         atoiDefault(c.QueryParam("limit"), 20),
+// Query params: source, status, event_type, q, from, to, page, limit, order(asc|desc)
+func (h *RestHandler) listWebhook(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:ListWebhook")
+	defer trace.Finish()
+
+	q := req.URL.Query()
+	filter := domain.FilterWebhookLog{
+		Source:        q.Get("source"),
+		PublishStatus: q.Get("status"),
+		EventType:     q.Get("event_type"),
+		Search:        q.Get("q"),
+		Page:          atoiDefault(q.Get("page"), 1),
+		Limit:         atoiDefault(q.Get("limit"), 20),
 		SortBy:        "created_at",
-		SortDesc:      c.QueryParam("order") != "asc",
+		SortDesc:      q.Get("order") != "asc",
 	}
 
-	if v := c.QueryParam("from"); v != "" {
+	if v := q.Get("from"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			filter.From = &t
 		} else if t, err := time.Parse("2006-01-02", v); err == nil {
 			filter.From = &t
 		}
 	}
-	if v := c.QueryParam("to"); v != "" {
+	if v := q.Get("to"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			filter.To = &t
 		} else if t, err := time.Parse("2006-01-02", v); err == nil {
@@ -45,106 +49,123 @@ func (h *RestHandler) List(c echo.Context) error {
 		}
 	}
 
-	logs, total, err := h.uc.List(c.Request().Context(), filter)
+	logs, total, err := h.uc.Webhook().ListWebhook(ctx, &filter)
 	if err != nil {
-		return response.Err(c, http.StatusInternalServerError, "failed to list webhook events")
+		trace.SetError(err)
+		wrapper.NewHTTPResponse(http.StatusInternalServerError, "failed to list webhook events").JSON(rw)
+		return
 	}
 
 	filter.Normalize()
-	return response.OKPaginated(c, http.StatusOK, "ok", logs, filter.Page, filter.Limit, total)
+	wrapper.NewHTTPResponseWithMeta(http.StatusOK, "ok",
+		domain.NewPagination(filter.Page, filter.Limit, total), logs).JSON(rw)
 }
 
-// Detail handles GET /dashboard/webhooks/:id -- full record for one event,
-// including headers, raw body, and Kafka publish outcome.
-func (h *RestHandler) Detail(c echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
+// getDetailWebhook handles GET /dashboard/webhooks/:id -- full record for
+// one event, including headers, raw body, and Kafka publish outcome.
+func (h *RestHandler) getDetailWebhook(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:GetDetailWebhook")
+	defer trace.Finish()
+
+	id, err := uuid.Parse(restserver.URLParam(req, "id"))
 	if err != nil {
-		return response.Err(c, http.StatusBadRequest, "invalid id")
+		wrapper.NewHTTPResponse(http.StatusBadRequest, "invalid id").JSON(rw)
+		return
 	}
 
-	log, err := h.uc.Detail(c.Request().Context(), id)
+	log, err := h.uc.Webhook().GetDetailWebhook(ctx, id)
 	if err != nil {
-		return response.Err(c, http.StatusNotFound, "webhook event not found")
+		trace.SetError(err)
+		writeError(rw, err, "webhook event not found", "failed to load webhook event")
+		return
 	}
 
-	return response.OK(c, http.StatusOK, "ok", log)
+	wrapper.NewHTTPResponse(http.StatusOK, "ok", log).JSON(rw)
 }
 
-// Sources handles GET /dashboard/webhooks/sources -- distinct payment
+// getSources handles GET /dashboard/webhooks/sources -- distinct payment
 // gateways seen so far, with event counts, for populating dashboard filters.
-func (h *RestHandler) Sources(c echo.Context) error {
-	sources, err := h.uc.Sources(c.Request().Context())
+func (h *RestHandler) getSources(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:GetSources")
+	defer trace.Finish()
+
+	sources, err := h.uc.Webhook().GetSources(ctx)
 	if err != nil {
-		return response.Err(c, http.StatusInternalServerError, "failed to load sources")
+		trace.SetError(err)
+		wrapper.NewHTTPResponse(http.StatusInternalServerError, "failed to load sources").JSON(rw)
+		return
 	}
-	return response.OK(c, http.StatusOK, "ok", sources)
+	wrapper.NewHTTPResponse(http.StatusOK, "ok", sources).JSON(rw)
 }
 
-// Stats handles GET /dashboard/webhooks/stats -- aggregate counts (by
+// getStats handles GET /dashboard/webhooks/stats -- aggregate counts (by
 // source, by publish status, per day) for the dashboard overview/charts.
 // Query params: from, to (default: last 7 days).
-func (h *RestHandler) Stats(c echo.Context) error {
+func (h *RestHandler) getStats(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:GetStats")
+	defer trace.Finish()
+
+	q := req.URL.Query()
 	to := time.Now()
 	from := to.AddDate(0, 0, -7)
 
-	if v := c.QueryParam("from"); v != "" {
+	if v := q.Get("from"); v != "" {
 		if t, err := time.Parse("2006-01-02", v); err == nil {
 			from = t
 		}
 	}
-	if v := c.QueryParam("to"); v != "" {
+	if v := q.Get("to"); v != "" {
 		if t, err := time.Parse("2006-01-02", v); err == nil {
 			to = t.Add(24*time.Hour - time.Second)
 		}
 	}
 
-	stats, err := h.uc.Stats(c.Request().Context(), from, to)
+	stats, err := h.uc.Webhook().GetStats(ctx, from, to)
 	if err != nil {
-		return response.Err(c, http.StatusInternalServerError, "failed to compute stats")
+		trace.SetError(err)
+		wrapper.NewHTTPResponse(http.StatusInternalServerError, "failed to compute stats").JSON(rw)
+		return
 	}
-	return response.OK(c, http.StatusOK, "ok", stats)
+	wrapper.NewHTTPResponse(http.StatusOK, "ok", stats).JSON(rw)
 }
 
-// Replay handles POST /dashboard/webhooks/:id/replay -- manually re-publish
-// a previously received event's original body to Kafka again.
-func (h *RestHandler) Replay(c echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
+// replayWebhook handles POST /dashboard/webhooks/:id/replay -- manually
+// re-publish a previously received event's original body to Kafka again.
+func (h *RestHandler) replayWebhook(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:ReplayWebhook")
+	defer trace.Finish()
+
+	id, err := uuid.Parse(restserver.URLParam(req, "id"))
 	if err != nil {
-		return response.Err(c, http.StatusBadRequest, "invalid id")
+		wrapper.NewHTTPResponse(http.StatusBadRequest, "invalid id").JSON(rw)
+		return
 	}
 
-	log, err := h.uc.Replay(c.Request().Context(), id)
+	log, err := h.uc.Webhook().ReplayWebhook(ctx, id)
 	if err != nil {
-		return response.Err(c, http.StatusNotFound, "webhook event not found")
+		trace.SetError(err)
+		writeError(rw, err, "webhook event not found", "failed to replay webhook event")
+		return
 	}
 
-	return response.OK(c, http.StatusOK, "replayed", log)
+	wrapper.NewHTTPResponse(http.StatusOK, "replayed", log).JSON(rw)
 }
 
-// RetryFailed handles POST /dashboard/webhooks/retry-failed -- bulk retry
-// every event currently stuck in "failed" publish status.
+// retryFailedWebhooks handles POST /dashboard/webhooks/retry-failed -- bulk
+// retry every event currently stuck in "failed" publish status.
 // Query param: limit (default 50).
-func (h *RestHandler) RetryFailed(c echo.Context) error {
-	limit := atoiDefault(c.QueryParam("limit"), 50)
+func (h *RestHandler) retryFailedWebhooks(rw http.ResponseWriter, req *http.Request) {
+	trace, ctx := tracer.StartTraceWithContext(req.Context(), "WebhookDeliveryREST:RetryFailedWebhooks")
+	defer trace.Finish()
 
-	retried, failed, err := h.uc.RetryFailed(c.Request().Context(), limit)
+	limit := atoiDefault(req.URL.Query().Get("limit"), 50)
+
+	result, err := h.uc.Webhook().RetryFailedWebhooks(ctx, limit)
 	if err != nil {
-		return response.Err(c, http.StatusInternalServerError, "failed to retry events")
+		trace.SetError(err)
+		wrapper.NewHTTPResponse(http.StatusInternalServerError, "failed to retry events").JSON(rw)
+		return
 	}
 
-	return response.OK(c, http.StatusOK, "retry completed", map[string]any{
-		"retried": retried,
-		"failed":  failed,
-	})
-}
-
-func atoiDefault(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return n
+	wrapper.NewHTTPResponse(http.StatusOK, "retry completed", result).JSON(rw)
 }

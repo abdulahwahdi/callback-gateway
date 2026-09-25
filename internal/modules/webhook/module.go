@@ -1,68 +1,73 @@
-// Package webhook wires the module's layers together (domain, repository,
-// usecase, delivery), following the same modular-monolith convention used
-// across candi-based services: each business capability lives in its own
-// self-contained module under internal/modules/<name>, exposing exactly the
-// pieces main.go needs to mount it.
+// Package webhook is the candi module that receives every payment-gateway
+// webhook callback, durably logs it (source + raw body), fans it out to
+// Kafka for every interested downstream service, and serves a dashboard API
+// for tracking all of it.
 package webhook
 
 import (
-	"time"
-
-	"gorm.io/gorm"
-
 	"webhook-middleware/internal/modules/webhook/delivery/resthandler"
-	"webhook-middleware/internal/modules/webhook/repository"
-	"webhook-middleware/internal/modules/webhook/usecase"
-	"webhook-middleware/internal/modules/webhook/worker"
-	"webhook-middleware/internal/pkg/broker"
-	"webhook-middleware/internal/pkg/verifier"
+	"webhook-middleware/internal/modules/webhook/delivery/workerhandler"
+	"webhook-middleware/pkg/shared/usecase"
+
+	"github.com/golangid/candi/codebase/factory/dependency"
+	"github.com/golangid/candi/codebase/factory/types"
+	"github.com/golangid/candi/codebase/interfaces"
 )
 
-// Module bundles everything the webhook module needs to run: its REST
-// handler (mounted onto the app's echo instance) and its background retry
-// worker (run as a goroutine by main.go).
+const (
+	moduleName types.Module = "Webhook"
+)
+
+// Module model
 type Module struct {
-	RestHandler *resthandler.RestHandler
-	RetryWorker *worker.RetryWorker
-	Usecase     usecase.WebhookUsecase
-	publisher   broker.Publisher
+	restHandler    interfaces.RESTHandler
+	grpcHandler    interfaces.GRPCHandler
+	graphqlHandler interfaces.GraphQLHandler
+
+	workerHandlers map[types.Worker]interfaces.WorkerHandler
+	serverHandlers map[types.Server]interfaces.ServerHandler
 }
 
-// Close releases the module's resources (Kafka writers).
-func (m *Module) Close() error {
-	return m.publisher.Close()
-}
+// NewModule module constructor
+func NewModule(deps dependency.Dependency) *Module {
+	var mod Module
+	mod.restHandler = resthandler.NewRestHandler(usecase.GetSharedUsecase(), deps)
 
-// Options configures how the module's dependencies are built.
-type Options struct {
-	DB                 *gorm.DB
-	KafkaBrokers        []string
-	KafkaCommonTopic    string
-	KafkaTopicPrefix    string
-	MaxPublishRetries   int
-	RetryWorkerInterval time.Duration
-	RetryWorkerBatch    int
-	Verifiers           *verifier.Registry
-}
-
-// New assembles the webhook module: repository -> usecase -> delivery/worker.
-func New(opts Options) *Module {
-	if opts.Verifiers == nil {
-		opts.Verifiers = verifier.NewRegistry()
+	mod.workerHandlers = map[types.Worker]interfaces.WorkerHandler{
+		types.Scheduler: workerhandler.NewCronHandler(usecase.GetSharedUsecase(), deps),
 	}
 
-	repo := repository.NewPostgresRepository(opts.DB)
-	publisher := broker.NewKafkaPublisher(opts.KafkaBrokers)
+	mod.serverHandlers = map[types.Server]interfaces.ServerHandler{}
 
-	uc := usecase.New(repo, publisher, opts.Verifiers, usecase.KafkaConfig{
-		CommonTopic: opts.KafkaCommonTopic,
-		TopicPrefix: opts.KafkaTopicPrefix,
-	}, opts.MaxPublishRetries)
+	return &mod
+}
 
-	return &Module{
-		RestHandler: resthandler.New(uc),
-		RetryWorker: worker.NewRetryWorker(uc, opts.RetryWorkerInterval, opts.RetryWorkerBatch),
-		Usecase:     uc,
-		publisher:   publisher,
-	}
+// RESTHandler method
+func (m *Module) RESTHandler() interfaces.RESTHandler {
+	return m.restHandler
+}
+
+// GRPCHandler method
+func (m *Module) GRPCHandler() interfaces.GRPCHandler {
+	return m.grpcHandler
+}
+
+// GraphQLHandler method
+func (m *Module) GraphQLHandler() interfaces.GraphQLHandler {
+	return m.graphqlHandler
+}
+
+// WorkerHandler method
+func (m *Module) WorkerHandler(workerType types.Worker) interfaces.WorkerHandler {
+	return m.workerHandlers[workerType]
+}
+
+// ServerHandler additional server type (another rest framework, p2p, and many more)
+func (m *Module) ServerHandler(serverType types.Server) interfaces.ServerHandler {
+	return m.serverHandlers[serverType]
+}
+
+// Name get module name
+func (m *Module) Name() types.Module {
+	return moduleName
 }

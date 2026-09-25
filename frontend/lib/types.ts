@@ -78,3 +78,21 @@ export interface RetryFailedResult {
   retried: number;
   failed: number;
 }
+
+export interface TopicRoute {
+  id: string;
+  env: string;
+  source: string;
+  topic: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TopicRouteInput {
+  env: string;
+  source: string;
+  topic: string;
+}
+
+export type TopicRoutePatch = Partial<TopicRouteInput & { enabled: boolean }>;

@@ -1,10 +1,13 @@
-.PHONY: run build tidy fmt test docker-up docker-down
+.PHONY: run build tidy fmt test migration docker-up docker-down
+
+migration:
+	@go run cmd/migration/migration.go up
 
 run:
-	go run ./cmd/webhook-middleware
+	go run .
 
 build:
-	go build -o bin/webhook-middleware ./cmd/webhook-middleware
+	go build -o bin/webhook-middleware .
 
 tidy:
 	go mod tidy

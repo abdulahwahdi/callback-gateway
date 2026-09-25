@@ -7,6 +7,8 @@ const STORAGE_KEY = "webhook-middleware:settings:v1";
 export interface DashboardSettings {
   apiBaseUrl: string;
   apiKey: string;
+  /** Session token from POST /auth/login (empty when logged out). */
+  token: string;
 }
 
 function defaults(): DashboardSettings {
@@ -15,6 +17,7 @@ function defaults(): DashboardSettings {
       process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
       "http://localhost:8090",
     apiKey: process.env.NEXT_PUBLIC_API_KEY || "",
+    token: "",
   };
 }
 
@@ -34,6 +37,8 @@ interface SettingsContextValue {
   settings: DashboardSettings;
   setSettings: (next: Partial<DashboardSettings>) => void;
   reset: () => void;
+  /** True once localStorage has been read (avoids a logged-out flash on load). */
+  ready: boolean;
 }
 
 const SettingsContext = React.createContext<SettingsContextValue | null>(null);
@@ -41,8 +46,11 @@ const SettingsContext = React.createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettingsState] = React.useState<DashboardSettings>(defaults);
 
+  const [ready, setReady] = React.useState(false);
+
   React.useEffect(() => {
     setSettingsState(load());
+    setReady(true);
   }, []);
 
   const setSettings = React.useCallback((next: Partial<DashboardSettings>) => {
@@ -64,8 +72,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = React.useMemo(
-    () => ({ settings, setSettings, reset }),
-    [settings, setSettings, reset]
+    () => ({ settings, setSettings, reset, ready }),
+    [settings, setSettings, reset, ready]
   );
 
   return React.createElement(SettingsContext.Provider, { value }, children);

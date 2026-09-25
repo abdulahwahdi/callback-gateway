@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSettings } from "@/lib/settings";
-import type { WebhookListFilter } from "@/lib/types";
+import type { TopicRouteInput, TopicRoutePatch, WebhookListFilter } from "@/lib/types";
 import { toast } from "sonner";
 
 const KEYS = {
@@ -103,5 +103,60 @@ export function useRetryFailed() {
         description: err instanceof ApiError ? err.message : "Unknown error",
       });
     },
+  });
+}
+
+export function useTopicRoutes() {
+  const { settings } = useSettings();
+  return useQuery({
+    queryKey: ["topic-routes"],
+    queryFn: () => api.listTopicRoutes(settings),
+  });
+}
+
+function errDescription(err: unknown) {
+  return err instanceof ApiError ? err.message : "Unknown error";
+}
+
+export function useCreateTopicRoute() {
+  const { settings } = useSettings();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: TopicRouteInput) => api.createTopicRoute(settings, input),
+    onSuccess: () => {
+      toast.success("Topic route created");
+      qc.invalidateQueries({ queryKey: ["topic-routes"] });
+    },
+    onError: (err) =>
+      toast.error("Create failed", { description: errDescription(err) }),
+  });
+}
+
+export function useUpdateTopicRoute() {
+  const { settings } = useSettings();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: TopicRoutePatch }) =>
+      api.updateTopicRoute(settings, id, patch),
+    onSuccess: () => {
+      toast.success("Topic route updated");
+      qc.invalidateQueries({ queryKey: ["topic-routes"] });
+    },
+    onError: (err) =>
+      toast.error("Update failed", { description: errDescription(err) }),
+  });
+}
+
+export function useDeleteTopicRoute() {
+  const { settings } = useSettings();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTopicRoute(settings, id),
+    onSuccess: () => {
+      toast.success("Topic route deleted");
+      qc.invalidateQueries({ queryKey: ["topic-routes"] });
+    },
+    onError: (err) =>
+      toast.error("Delete failed", { description: errDescription(err) }),
   });
 }

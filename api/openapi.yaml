@@ -87,6 +87,56 @@ paths:
         - { name: limit, in: query, schema: { type: integer, default: 50 } }
       responses:
         "200": { description: Retry summary }
+  /dashboard/topic-routes:
+    get:
+      summary: List DB-configured (env, source) -> Kafka topic overrides
+      description: >
+        Layered on top of the KAFKA_COMMON_TOPIC / KAFKA_SOURCE_TOPIC_TEMPLATE
+        env-var templates (which may reference ":env" and ":source"). Env or
+        source may be "*" as a wildcard.
+      responses:
+        "200": { description: List of topic routes }
+    post:
+      summary: Add a topic route override
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [env, source, topic]
+              properties:
+                env: { type: string, example: production }
+                source: { type: string, example: midtrans }
+                topic: { type: string, example: webhook_gateway.production.midtrans }
+      responses:
+        "201": { description: Created }
+        "400": { description: Invalid request }
+  /dashboard/topic-routes/{id}:
+    put:
+      summary: Update a topic route override
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                env: { type: string }
+                source: { type: string }
+                topic: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Updated }
+        "404": { description: Not found }
+    delete:
+      summary: Remove a topic route override
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Deleted }
 components:
   securitySchemes:
     ApiKeyAuth:

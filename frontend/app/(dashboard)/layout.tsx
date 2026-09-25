@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/app-sidebar";
+import { AuthGate } from "@/components/auth-gate";
 import { Topbar } from "@/components/topbar";
 
 export default function DashboardLayout({
@@ -7,6 +8,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
+    <AuthGate>
     <div className="min-h-screen bg-background">
       <AppSidebar />
       <div className="flex min-h-screen flex-col lg:pl-64">
@@ -16,5 +18,6 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+    </AuthGate>
   );
 }

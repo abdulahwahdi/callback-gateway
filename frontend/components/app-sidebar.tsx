@@ -4,14 +4,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Activity,
+  BookOpen,
+  ExternalLink,
   Gauge,
   Radio,
+  Route,
   Settings as SettingsIcon,
   Webhook,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useHealth } from "@/hooks/use-webhooks";
+import { useSettings } from "@/lib/settings";
 
 const NAV = [
   {
@@ -33,6 +37,12 @@ const NAV = [
     description: "Gateways seen so far",
   },
   {
+    href: "/topics",
+    label: "Topic Manager",
+    icon: Route,
+    description: "Kafka topic overrides",
+  },
+  {
     href: "/settings",
     label: "Settings",
     icon: SettingsIcon,
@@ -43,7 +53,9 @@ const NAV = [
 export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { data: health, isError } = useHealth();
+  const { settings } = useSettings();
   const online = !isError && Boolean(health);
+  const docsUrl = `${settings.apiBaseUrl.replace(/\/+$/, "")}/docs`;
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -102,6 +114,17 @@ export function AppSidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             </Link>
           );
         })}
+
+        <a
+          href={docsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-white/5 hover:text-white"
+        >
+          <BookOpen className="h-4 w-4 shrink-0" />
+          <span className="flex-1">API Docs</span>
+          <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />
+        </a>
       </nav>
 
       <div className="mx-3 mb-4 mt-2 rounded-xl border border-sidebar-border bg-white/5 p-3.5">

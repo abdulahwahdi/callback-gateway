@@ -34,7 +34,7 @@ export default function SettingsPage() {
   const handleTest = async () => {
     setTestState("loading");
     try {
-      await api.health({ apiBaseUrl: apiBaseUrl.trim().replace(/\/+$/, ""), apiKey: apiKey.trim() });
+      await api.health({ apiBaseUrl: apiBaseUrl.trim().replace(/\/+$/, ""), apiKey: apiKey.trim(), token: settings.token });
       setTestState("ok");
       setTestMessage("Connected successfully.");
     } catch (err) {

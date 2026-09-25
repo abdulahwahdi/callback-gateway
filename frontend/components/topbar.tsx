@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Menu, RefreshCw } from "lucide-react";
+import { LogOut, Menu, RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { VisuallyHidden } from "@/components/ui/visually-hidden";
 import { AppSidebarContent } from "@/components/app-sidebar";
+import { useSettings } from "@/lib/settings";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 const TITLES: Record<string, { title: string; description: string }> = {
@@ -23,6 +24,10 @@ const TITLES: Record<string, { title: string; description: string }> = {
   "/sources": {
     title: "Sources",
     description: "Distinct payment gateways seen by this middleware.",
+  },
+  "/topics": {
+    title: "Topic Manager",
+    description: "Route each (env, source) pair to a specific Kafka topic.",
   },
   "/settings": {
     title: "Settings",
@@ -42,6 +47,7 @@ export function Topbar() {
   const qc = useQueryClient();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [spinning, setSpinning] = React.useState(false);
+  const { settings, setSettings } = useSettings();
   const { title, description } = resolveTitle(pathname);
 
   const handleRefresh = () => {
@@ -84,6 +90,20 @@ export function Topbar() {
         <RefreshCw className={spinning ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
       </Button>
       <ThemeToggle />
+      {settings.token && (
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="Sign out"
+          onClick={() => {
+            setSettings({ token: "" });
+            qc.clear();
+            router.replace("/login");
+          }}
+        >
+          <LogOut className="h-4 w-4" />
+        </Button>
+      )}
     </header>
   );
 }
